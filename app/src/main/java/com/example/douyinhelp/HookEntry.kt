@@ -1,6 +1,5 @@
 package com.example.douyinhelp
 
-import android.view.MotionEvent
 import com.highcapable.yukihookapi.annotation.xposed.InjectYukiHookWithXposed
 import com.highcapable.yukihookapi.hook.factory.configs
 import com.highcapable.yukihookapi.hook.factory.encase
@@ -8,6 +7,8 @@ import com.highcapable.yukihookapi.hook.factory.method
 import com.highcapable.yukihookapi.hook.log.loggerD
 import com.highcapable.yukihookapi.hook.xposed.proxy.IYukiHookXposedInit
 import org.luckypray.dexkit.DexKitBridge
+import org.luckypray.dexkit.query.enums.StringMatchType
+import org.luckypray.dexkit.query.matchers.base.StringMatcher
 
 @InjectYukiHookWithXposed
 class HookEntry : IYukiHookXposedInit {
@@ -122,38 +123,15 @@ class HookEntry : IYukiHookXposedInit {
 
                 // ============================================================
                 // 2. 找 VideoEvent
-                //
-                // DouyinEnhancer 原代码也是通过：
-                // VideoEvent / param / videoType / isPlaying / toString
-                // 来定位。
                 // ============================================================
 
                 val videoEventClassData = bridge.findClass {
                     matcher {
                         usingStrings {
-                            add {
-                                value = "VideoEvent"
-                                matchType =
-                                    org.luckypray.dexkit.query.enums.StringMatchType.Contains
-                            }
-
-                            add {
-                                value = "param"
-                                matchType =
-                                    org.luckypray.dexkit.query.enums.StringMatchType.Contains
-                            }
-
-                            add {
-                                value = "videoType"
-                                matchType =
-                                    org.luckypray.dexkit.query.enums.StringMatchType.Contains
-                            }
-
-                            add {
-                                value = "isPlaying"
-                                matchType =
-                                    org.luckypray.dexkit.query.enums.StringMatchType.Contains
-                            }
+                            add(StringMatcher("VideoEvent", StringMatchType.Contains))
+                            add(StringMatcher("param", StringMatchType.Contains))
+                            add(StringMatcher("videoType", StringMatchType.Contains))
+                            add(StringMatcher("isPlaying", StringMatchType.Contains))
                         }
 
                         methods {
@@ -193,14 +171,6 @@ class HookEntry : IYukiHookXposedInit {
 
                 // ============================================================
                 // 4. 找 VideoEvent(int, Aweme) 构造函数
-                //
-                // 原模块实际调用：
-                //
-                // VideoEventModule.EVENT_OPEN_COMMENT_PANEL = 7
-                // createInstance(7, aweme)
-                //
-                // 所以这里直接寻找：
-                // (int, Aweme)
                 // ============================================================
 
                 val videoEventConstructor =
@@ -253,14 +223,7 @@ class HookEntry : IYukiHookXposedInit {
 
                         method {
                             name = handleDoubleClickData.methodName
-
-                            parameters {
-                                values.clear()
-
-                                handleDoubleClickData.paramTypeNames.forEach {
-                                    values.add(it)
-                                }
-                            }
+                            param(*handleDoubleClickData.paramTypeNames.toTypedArray())
                         }
 
                         beforeHook {
