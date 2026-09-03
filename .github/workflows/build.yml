@@ -19,24 +19,18 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
 
-      - name: Check environment
+      - name: Generate Gradle Wrapper
         run: |
-          java -version
-          echo "JAVA_TOOL_OPTIONS=$JAVA_TOOL_OPTIONS"
-          echo "_JAVA_OPTIONS=$_JAVA_OPTIONS"
-          echo "GRADLE_OPTS=$GRADLE_OPTS"
-          
-
-      - name: Inspect Gradle Wrapper
-        run: |
-          grep -nE 'DEFAULT_JVM_OPTS|JAVA_OPTS|GRADLE_OPTS|Xmx' gradlew || true
-          cat gradle/wrapper/gradle-wrapper.properties
+          gradle wrapper --gradle-version 8.7
+          chmod +x gradlew
 
       - name: Build APK
-        run: ./gradlew assembleDebug
+        run: ./gradlew --no-daemon assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
