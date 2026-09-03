@@ -1,13 +1,13 @@
 package com.example.douyinhelp
 
+import android.view.MotionEvent
 import com.highcapable.yukihookapi.annotation.xposed.InjectYukiHookWithXposed
 import com.highcapable.yukihookapi.hook.factory.configs
 import com.highcapable.yukihookapi.hook.factory.encase
+import com.highcapable.yukihookapi.hook.factory.method
 import com.highcapable.yukihookapi.hook.log.loggerD
 import com.highcapable.yukihookapi.hook.xposed.proxy.IYukiHookXposedInit
 import org.luckypray.dexkit.DexKitBridge
-import java.lang.reflect.Constructor
-import java.lang.reflect.Method
 
 @InjectYukiHookWithXposed
 class HookEntry : IYukiHookXposedInit {
@@ -19,121 +19,348 @@ class HookEntry : IYukiHookXposedInit {
     override fun onHook() = encase {
         loadApp(name = "com.ss.android.ugc.aweme") {
 
-            val apkPath = appInfo.sourceDir
-            System.loadLibrary("dexkit")
-
-            val classLoader = appClassLoader ?: run {
-                loggerD(msg = "获取 App ClassLoader 失败")
+            try {
+                System.loadLibrary("dexkit")
+            } catch (e: Throwable) {
+                loggerD(msg = "DexKit 加载失败: ${e.stackTraceToString()}")
                 return@loadApp
             }
 
+            val classLoader = appClassLoader ?: run {
+                loggerD(msg = "获取抖音 ClassLoader 失败")
+                return@loadApp
+            }
+
+            val apkPath = appInfo.sourceDir
+
             DexKitBridge.create(apkPath).use { bridge ->
 
-                // 1. 定位 BaseListFragmentPanel 类
-                val panelClassName = bridge.findClass {
-                    matcher {
-                        usingStrings("BaseListFragmentPanel", "getCurrentAweme")
-                    }
-                }.firstOrNull()?.name ?: bridge.findClass {
-                    matcher {
-                        usingStrings("getCurrentAweme")
-                    }
-                }.firstOrNull()?.name
+                // ============================================================
+                // 1. BaseListFragmentPanel
+                // ============================================================
 
-                // 2. 定位 VideoEvent 事件类
-                val videoEventClassName = bridge.findClass {
-                    matcher {
-                        usingStrings("EVENT_OPEN_COMMENT_PANEL", "VideoEvent")
-                    }
-                }.firstOrNull()?.name ?: bridge.findClass {
-                    matcher {
-                        usingStrings("com/ss/android/ugc/aweme/feed/model/VideoEvent")
-                    }
-                }.firstOrNull()?.name
+                val baseClassData =
+                    bridge.getClassData(
+                        "com.ss.android.ugc.aweme.feed.panel.BaseListFragmentPanel"
+                    )
 
-                if (panelClassName == null || videoEventClassName == null) {
-                    loggerD(msg = "DexKit 定位 Panel 或 VideoEvent 失败")
+                if (baseClassData == null) {
+                    loggerD(msg = "找不到 BaseListFragmentPanel")
                     return@loadApp
                 }
 
-                loggerD(msg = "Panel 类: $panelClassName")
-                loggerD(msg = "VideoEvent 类: $videoEventClassName")
+                // handleDoubleClick(MotionEvent)
+                val handleDoubleClickData = bridge.findMethod {
+                    searchClasses = listOf(baseClassData)
 
-                val panelJavaClass = Class.forName(panelClassName, false, classLoader)
-                val videoEventJavaClass = Class.forName(videoEventClassName, false, classLoader)
+                    matcher {
+                        name = "handleDoubleClick"
 
-                // 3. 寻找 Panel 中无参且返回 Void 的双击处理方法 handleDoubleClick
-                val handleDoubleClickMethod: Method = panelJavaClass.declaredMethods.firstOrNull { m ->
-                    m.returnType == Void.TYPE && m.parameterTypes.isEmpty()
-                } ?: run {
-                    loggerD(msg = "未找到 handleDoubleClick 方法")
+                        params {
+                            add("android.view.MotionEvent")
+                        }
+                    }
+                }.singleOrNull()
+
+                // handleVideoEvent(一个参数，void)
+                val handleVideoEventData = bridge.findMethod {
+                    searchClasses = listOf(baseClassData)
+
+                    matcher {
+                        name = "handleVideoEvent"
+                        paramCount = 1
+                        returnType = "void"
+                    }
+                }.singleOrNull()
+
+                // getCurrentAweme()
+                val getCurrentAwemeData = bridge.findMethod {
+                    searchClasses = listOf(baseClassData)
+
+                    matcher {
+                        name = "getCurrentAweme"
+                        paramCount = 0
+                    }
+                }.singleOrNull()
+
+                if (
+                    handleDoubleClickData == null ||
+                    handleVideoEventData == null ||
+                    getCurrentAwemeData == null
+                ) {
+                    loggerD(msg = "BaseListFragmentPanel 方法定位失败")
+                    loggerD(
+                        msg = "doubleClick=$handleDoubleClickData, " +
+                                "videoEvent=$handleVideoEventData, " +
+                                "currentAweme=$getCurrentAwemeData"
+                    )
                     return@loadApp
                 }
 
-                // 4. 寻找 getCurrentAweme 方法
-                val getCurrentAwemeMethod: Method = panelJavaClass.declaredMethods.firstOrNull { m ->
-                    m.parameterTypes.isEmpty() && m.returnType.name.contains("Aweme")
-                } ?: run {
-                    loggerD(msg = "未找到 getCurrentAweme 方法")
+                loggerD(
+                    msg = "BaseListFragmentPanel = ${baseClassData.name}"
+                )
+
+                loggerD(
+                    msg = "handleDoubleClick = " +
+                            "${handleDoubleClickData.methodName}(" +
+                            handleDoubleClickData.paramTypeNames.joinToString() +
+                            ")"
+                )
+
+                loggerD(
+                    msg = "handleVideoEvent = " +
+                            "${handleVideoEventData.methodName}(" +
+                            handleVideoEventData.paramTypeNames.joinToString() +
+                            ")"
+                )
+
+                loggerD(
+                    msg = "getCurrentAweme = " +
+                            "${getCurrentAwemeData.methodName}()"
+                )
+
+                // ============================================================
+                // 2. 找 VideoEvent
+                //
+                // DouyinEnhancer 原代码也是通过：
+                // VideoEvent / param / videoType / isPlaying / toString
+                // 来定位。
+                // ============================================================
+
+                val videoEventClassData = bridge.findClass {
+                    matcher {
+                        usingStrings {
+                            add {
+                                value = "VideoEvent"
+                                matchType =
+                                    org.luckypray.dexkit.query.enums.StringMatchType.Contains
+                            }
+
+                            add {
+                                value = "param"
+                                matchType =
+                                    org.luckypray.dexkit.query.enums.StringMatchType.Contains
+                            }
+
+                            add {
+                                value = "videoType"
+                                matchType =
+                                    org.luckypray.dexkit.query.enums.StringMatchType.Contains
+                            }
+
+                            add {
+                                value = "isPlaying"
+                                matchType =
+                                    org.luckypray.dexkit.query.enums.StringMatchType.Contains
+                            }
+                        }
+
+                        methods {
+                            add {
+                                name = "toString"
+                            }
+                        }
+                    }
+                }.singleOrNull()
+
+                if (videoEventClassData == null) {
+                    loggerD(msg = "找不到 VideoEvent 类")
                     return@loadApp
                 }
 
-                // 5. Hook 双击处理逻辑
-                findClass(panelClassName).hook {
+                loggerD(
+                    msg = "VideoEvent = ${videoEventClassData.name}"
+                )
+
+                // ============================================================
+                // 3. 获取真正的 Java Class
+                // ============================================================
+
+                val baseClass =
+                    Class.forName(
+                        baseClassData.name,
+                        false,
+                        classLoader
+                    )
+
+                val videoEventClass =
+                    Class.forName(
+                        videoEventClassData.name,
+                        false,
+                        classLoader
+                    )
+
+                // ============================================================
+                // 4. 找 VideoEvent(int, Aweme) 构造函数
+                //
+                // 原模块实际调用：
+                //
+                // VideoEventModule.EVENT_OPEN_COMMENT_PANEL = 7
+                // createInstance(7, aweme)
+                //
+                // 所以这里直接寻找：
+                // (int, Aweme)
+                // ============================================================
+
+                val videoEventConstructor =
+                    videoEventClass.declaredConstructors
+                        .firstOrNull { constructor ->
+
+                            val types = constructor.parameterTypes
+
+                            types.size == 2 &&
+                                    (
+                                            types[0] == Int::class.javaPrimitiveType ||
+                                                    types[0] == Int::class.javaObjectType
+                                            ) &&
+                                    types[1].isAssignableFrom(
+                                        Class.forName(
+                                            "com.ss.android.ugc.aweme.feed.model.Aweme",
+                                            false,
+                                            classLoader
+                                        )
+                                    )
+                        }
+
+                if (videoEventConstructor == null) {
+                    loggerD(
+                        msg = "找不到 VideoEvent(int, Aweme) 构造函数"
+                    )
+
+                    videoEventClass.declaredConstructors.forEach {
+                        loggerD(
+                            msg = "VideoEvent 构造函数: $it"
+                        )
+                    }
+
+                    return@loadApp
+                }
+
+                videoEventConstructor.isAccessible = true
+
+                loggerD(
+                    msg = "VideoEvent 构造函数 = $videoEventConstructor"
+                )
+
+                // ============================================================
+                // 5. Hook handleDoubleClick(MotionEvent)
+                // ============================================================
+
+                findClass(baseClass.name).hook {
+
                     injectMember {
+
                         method {
-                            name = handleDoubleClickMethod.name
+                            name = handleDoubleClickData.methodName
+
+                            parameters {
+                                values.clear()
+
+                                handleDoubleClickData.paramTypeNames.forEach {
+                                    values.add(it)
+                                }
+                            }
                         }
 
                         beforeHook {
-                            // 拦截原生双击点赞
-                            resultNull()
 
                             try {
+
+                                // ------------------------------------------------
                                 // 获取当前 Aweme
-                                getCurrentAwemeMethod.isAccessible = true
-                                val awemeObj = getCurrentAwemeMethod.invoke(instance) ?: run {
-                                    loggerD(msg = "getCurrentAweme 返回为空")
+                                // ------------------------------------------------
+
+                                val getCurrentAwemeMethod =
+                                    baseClass.getDeclaredMethod(
+                                        getCurrentAwemeData.methodName
+                                    ).apply {
+                                        isAccessible = true
+                                    }
+
+                                val aweme =
+                                    getCurrentAwemeMethod.invoke(instance)
+
+                                if (aweme == null) {
+                                    loggerD(
+                                        msg = "getCurrentAweme() 返回 null"
+                                    )
                                     return@beforeHook
                                 }
 
-                                // 构造 VideoEvent(14, awemeObj) —— 14 通常代表 EVENT_OPEN_COMMENT_PANEL
-                                val eventConstructor: Constructor<*>? = videoEventJavaClass.declaredConstructors.firstOrNull { c ->
-                                    val params = c.parameterTypes
-                                    params.size == 2 && 
-                                    (params[0] == Int::class.javaPrimitiveType || params[0] == Integer::class.java) &&
-                                    params[1].isAssignableFrom(awemeObj.javaClass)
-                                }
+                                loggerD(
+                                    msg = "当前 Aweme = ${aweme.javaClass.name}"
+                                )
 
-                                if (eventConstructor == null) {
-                                    loggerD(msg = "未找到合适的 VideoEvent 构造函数")
-                                    return@beforeHook
-                                }
+                                // ------------------------------------------------
+                                // 创建 VideoEvent
+                                // EVENT_OPEN_COMMENT_PANEL = 7
+                                // ------------------------------------------------
 
-                                eventConstructor.isAccessible = true
-                                val openCommentEvent = eventConstructor.newInstance(14, awemeObj)
+                                val openCommentEvent =
+                                    videoEventConstructor.newInstance(
+                                        7,
+                                        aweme
+                                    )
 
-                                // 查找 Panel 中接收 VideoEvent 参数的分发方法 handleVideoEvent
-                                val handleVideoEventMethod: Method? = panelJavaClass.declaredMethods.firstOrNull { m ->
-                                    m.parameterTypes.size == 1 && m.parameterTypes[0].isAssignableFrom(videoEventJavaClass)
-                                }
+                                loggerD(
+                                    msg = "VideoEvent 创建成功"
+                                )
+
+                                // ------------------------------------------------
+                                // 调用当前 BaseListFragmentPanel.handleVideoEvent()
+                                // ------------------------------------------------
+
+                                val handleVideoEventMethod =
+                                    baseClass.declaredMethods
+                                        .firstOrNull { method ->
+
+                                            method.name ==
+                                                    handleVideoEventData.methodName &&
+                                                    method.parameterTypes.size ==
+                                                    handleVideoEventData.paramTypeNames.size
+                                        }
 
                                 if (handleVideoEventMethod == null) {
-                                    loggerD(msg = "未找到 handleVideoEvent 方法")
+                                    loggerD(
+                                        msg = "找不到 handleVideoEvent 实例方法"
+                                    )
                                     return@beforeHook
                                 }
 
                                 handleVideoEventMethod.isAccessible = true
-                                handleVideoEventMethod.invoke(instance, openCommentEvent)
 
-                                loggerD(msg = "成功分发打开评论区事件")
+                                handleVideoEventMethod.invoke(
+                                    instance,
+                                    openCommentEvent
+                                )
+
+                                loggerD(
+                                    msg = "成功打开评论区"
+                                )
+
+                                // ------------------------------------------------
+                                // 最关键：
+                                // 阻止原来的双击点赞
+                                // ------------------------------------------------
+
+                                resultNull()
 
                             } catch (e: Throwable) {
-                                loggerD(msg = "触发打开评论区异常: ${e.stackTraceToString()}")
+
+                                loggerD(
+                                    msg =
+                                        "双击打开评论区失败: " +
+                                                e.stackTraceToString()
+                                )
                             }
                         }
                     }
                 }
+
+                loggerD(
+                    msg = "DouyinHelp 双击评论 Hook 安装成功"
+                )
             }
         }
     }
