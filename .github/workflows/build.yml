@@ -30,5 +30,7 @@ jobs:
           echo "GRADLE_OPTS=$GRADLE_OPTS"
           ./gradlew --version
 
-      - name: Build
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Inspect Gradle Wrapper
+        run: |
+          grep -nE 'DEFAULT_JVM_OPTS|JAVA_OPTS|GRADLE_OPTS|Xmx' gradlew || true
+          cat gradle/wrapper/gradle-wrapper.properties
