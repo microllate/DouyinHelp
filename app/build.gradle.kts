@@ -47,6 +47,5 @@ dependencies {
     implementation("com.highcapable.yukihookapi:api:1.2.0")
     ksp("com.highcapable.yukihookapi:ksp-xposed:1.2.0")
 
-    // 3. Xposed 基础 API（仅编译时依赖）
-    compileOnly("de.robv.android.xposed:api:82")
+    
 }
