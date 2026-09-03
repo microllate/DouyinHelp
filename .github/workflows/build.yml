@@ -17,13 +17,12 @@ jobs:
       with:
         java-version: '17'
         distribution: 'temurin'
-        cache: gradle
+        # 暂时去掉 cache: gradle，防止坏缓存持续污染环境
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    - name: Build with Gradle
-      env:
-        GRADLE_OPTS: -Xmx2048m -Dfile.encoding=UTF-8
-      run: ./gradlew assembleDebug
-
+    - name: Force Fix JVM Args & Build
+      run: |
+        echo "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" > gradle.properties
+        ./gradlew assembleDebug
