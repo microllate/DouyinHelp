@@ -52,5 +52,5 @@ dependencies {
     ksp("com.highcapable.yukihookapi:ksp-xposed:1.2.0")
 
     // Xposed API
-    compileOnly(files("libs/api-82.jar"))
+    compileOnly("com.github.libxposed:api:100")
 }
