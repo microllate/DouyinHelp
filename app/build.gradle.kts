@@ -1,6 +1,7 @@
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.ksp) // YukiHookAPI 需要 ksp 来处理注解
 }
 
 android {
@@ -9,10 +10,15 @@ android {
 
     defaultConfig {
         applicationId = "com.example.douyinhelp"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+
+        // 配置支持的 CPU 架构（DexKit native 库需要）
+        ndk {
+            abiFilters.addAll(setOf("arm64-v8a", "armeabi-v7a", "x86_64"))
+        }
     }
 
     buildTypes {
@@ -34,6 +40,13 @@ android {
 }
 
 dependencies {
-    compileOnly("com.highcapable.yukihookapi:api:1.2.1")
-    implementation("androidx.core:core-ktx:1.13.1")
+    // 1. DexKit 核心依赖
+    implementation("org.luckypray:dexkit:2.0.1")
+
+    // 2. YukiHookAPI 依赖与注解处理器
+    implementation("com.highcapable.yukihookapi:api:1.2.0")
+    ksp("com.highcapable.yukihookapi:ksp-xposed:1.2.0")
+
+    // 3. Xposed 基础 API（仅编译时依赖）
+    providedCompileOnly("de.robv.android.xposed:api:82")
 }
