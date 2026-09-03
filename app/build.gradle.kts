@@ -46,8 +46,8 @@ android {
 dependencies {
     implementation("org.luckypray:dexkit:2.0.1")
 
-    implementation("com.highcapable.yukihookapi:api:1.2.0")
-    ksp("com.highcapable.yukihookapi:ksp-xposed:1.2.0")
+    implementation("com.highcapable.yukihookapi:api:1.2.1")
+    ksp("com.highcapable.yukihookapi:ksp-xposed:1.2.1")
 
     compileOnly("de.robv.android.xposed:api:82")
 }
