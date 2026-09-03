@@ -23,4 +23,7 @@ jobs:
       run: chmod +x gradlew
 
     - name: Build with Gradle
+      env:
+        GRADLE_OPTS: -Xmx2048m -Dfile.encoding=UTF-8
       run: ./gradlew assembleDebug
+
