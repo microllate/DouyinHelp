@@ -34,3 +34,12 @@ jobs:
         run: |
           grep -nE 'DEFAULT_JVM_OPTS|JAVA_OPTS|GRADLE_OPTS|Xmx' gradlew || true
           cat gradle/wrapper/gradle-wrapper.properties
+
+      - name: Build APK
+        run: ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
