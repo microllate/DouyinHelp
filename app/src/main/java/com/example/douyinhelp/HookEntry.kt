@@ -26,21 +26,21 @@ class HookEntry : IYukiHookXposedInit {
                 // 查找双击手势类
                 val doubleTapClassName = bridge.findClass {
                     matcher {
-                        usingString("onDoubleTap")
+                        usingStrings("onDoubleTap")
                     }
                 }.firstOrNull()?.name
 
                 // 查找 EventBus
                 val eventBusClassData = bridge.findClass {
                     matcher {
-                        usingString("No subscribers registered for event")
+                        usingStrings("No subscribers registered for event")
                     }
                 }.firstOrNull()
 
                 // 查找评论事件类
                 val commentEventClassName = bridge.findClass {
                     matcher {
-                        usingString("/douyin/comment")
+                        usingStrings("/douyin/comment")
                     }
                 }.firstOrNull()?.name
 
@@ -59,8 +59,16 @@ class HookEntry : IYukiHookXposedInit {
                 loggerD(msg = "评论事件类: $commentEventClassName")
                 loggerD(msg = "EventBus 类: ${eventBusClassData.name}")
 
-                val eventBusClass = eventBusClassData.getInstance(appClassLoader)
-                val commentEventClass = findClass(commentEventClassName)
+                val classLoader = appClassLoader ?: run {
+                    loggerD(msg = "获取 App ClassLoader 失败")
+                    return@loadApp
+                }
+
+                val eventBusClass = eventBusClassData.getInstance(classLoader)
+
+                // 使用 Java Class，避免和 YukiHookAPI 的 KClass 混淆
+                val commentEventJavaClass =
+                    Class.forName(commentEventClassName, false, classLoader)
 
                 // Hook 双击
                 findClass(doubleTapClassName).hook {
@@ -71,8 +79,7 @@ class HookEntry : IYukiHookXposedInit {
 
                         beforeHook {
 
-                            // onDoubleTap 通常返回 boolean
-                            // false = 不执行默认双击点赞逻辑
+                            // 阻止原来的双击点赞
                             resultFalse()
 
                             try {
@@ -80,7 +87,7 @@ class HookEntry : IYukiHookXposedInit {
                                 // 查找 Aweme 参数
                                 val awemeObj = args.firstOrNull {
                                     it != null &&
-                                    it.javaClass.name.contains("Aweme")
+                                        it.javaClass.name.contains("Aweme")
                                 }
 
                                 if (awemeObj == null) {
@@ -90,24 +97,18 @@ class HookEntry : IYukiHookXposedInit {
 
                                 /*
                                  * 查找评论事件构造函数
-                                 *
-                                 * 不再直接使用：
-                                 * getConstructor(awemeObj.javaClass)
-                                 *
-                                 * 而是寻找只有一个参数、且可以接收当前 Aweme
                                  */
-                                val constructor = commentEventClass
-                                    .constructors
-                                    .firstOrNull { ctor ->
+                                val constructor =
+                                    commentEventJavaClass.declaredConstructors
+                                        .firstOrNull { ctor ->
+                                            val parameterTypes = ctor.parameterTypes
 
-                                        val parameterTypes = ctor.parameterTypes
-
-                                        parameterTypes.size == 1 &&
+                                            parameterTypes.size == 1 &&
                                                 parameterTypes[0]
                                                     .isAssignableFrom(
                                                         awemeObj.javaClass
                                                     )
-                                    }
+                                        }
 
                                 if (constructor == null) {
                                     loggerD(
@@ -115,6 +116,8 @@ class HookEntry : IYukiHookXposedInit {
                                     )
                                     return@beforeHook
                                 }
+
+                                constructor.isAccessible = true
 
                                 val commentEvent =
                                     constructor.newInstance(awemeObj)
@@ -132,22 +135,16 @@ class HookEntry : IYukiHookXposedInit {
 
                                 /*
                                  * 查找 post 方法
-                                 *
-                                 * 不再强制要求：
-                                 * post(Any)
-                                 *
-                                 * 而是寻找一个参数的 post 方法。
                                  */
                                 val postMethod =
-                                    eventBusClass.methods
-                                        .firstOrNull { method ->
-
-                                            method.name == "post" &&
-                                                    method.parameterTypes.size == 1 &&
-                                                    method.parameterTypes[0]
-                                                        .isAssignableFrom(
-                                                            commentEvent.javaClass
-                                                        )
+                                    eventBusClass.java.methods
+                                        .firstOrNull { post ->
+                                            post.name == "post" &&
+                                                post.parameterTypes.size == 1 &&
+                                                post.parameterTypes[0]
+                                                    .isAssignableFrom(
+                                                        commentEvent.javaClass
+                                                    )
                                         }
 
                                 if (postMethod == null) {
@@ -156,6 +153,8 @@ class HookEntry : IYukiHookXposedInit {
                                     )
                                     return@beforeHook
                                 }
+
+                                postMethod.isAccessible = true
 
                                 postMethod.invoke(
                                     eventBusInstance,
