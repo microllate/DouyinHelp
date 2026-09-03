@@ -44,13 +44,10 @@ android {
 }
 
 dependencies {
-    // DexKit
     implementation("org.luckypray:dexkit:2.0.1")
 
-    // YukiHookAPI
     implementation("com.highcapable.yukihookapi:api:1.2.0")
     ksp("com.highcapable.yukihookapi:ksp-xposed:1.2.0")
 
-    // Xposed API
-    compileOnly("com.github.libxposed:api:100")
+    compileOnly("de.robv.android.xposed:api:82")
 }
