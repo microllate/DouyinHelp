@@ -45,9 +45,10 @@ android {
 
 dependencies {
     implementation("org.luckypray:dexkit:2.0.1")
-
+    implementation("androidx.annotation:annotation:1.8.2")
     implementation("com.highcapable.yukihookapi:api:1.2.1")
     ksp("com.highcapable.yukihookapi:ksp-xposed:1.2.1")
 
     compileOnly("de.robv.android.xposed:api:82")
+   
 }
