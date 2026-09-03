@@ -21,6 +21,11 @@ class HookEntry : IYukiHookXposedInit {
             val apkPath = appInfo.sourceDir
             System.loadLibrary("dexkit")
 
+            val classLoader = appClassLoader ?: run {
+                loggerD(msg = "获取 App ClassLoader 失败")
+                return@loadApp
+            }
+
             DexKitBridge.create(apkPath).use { bridge ->
 
                 // 查找双击手势类
@@ -31,11 +36,11 @@ class HookEntry : IYukiHookXposedInit {
                 }.firstOrNull()?.name
 
                 // 查找 EventBus
-                val eventBusClassData = bridge.findClass {
+                val eventBusClassName = bridge.findClass {
                     matcher {
                         usingStrings("No subscribers registered for event")
                     }
-                }.firstOrNull()
+                }.firstOrNull()?.name
 
                 // 查找评论事件类
                 val commentEventClassName = bridge.findClass {
@@ -46,7 +51,7 @@ class HookEntry : IYukiHookXposedInit {
 
                 if (
                     doubleTapClassName == null ||
-                    eventBusClassData == null ||
+                    eventBusClassName == null ||
                     commentEventClassName == null
                 ) {
                     loggerD(
@@ -57,18 +62,25 @@ class HookEntry : IYukiHookXposedInit {
 
                 loggerD(msg = "双击类: $doubleTapClassName")
                 loggerD(msg = "评论事件类: $commentEventClassName")
-                loggerD(msg = "EventBus 类: ${eventBusClassData.name}")
+                loggerD(msg = "EventBus 类: $eventBusClassName")
 
-                val classLoader = appClassLoader ?: run {
-                    loggerD(msg = "获取 App ClassLoader 失败")
-                    return@loadApp
-                }
+                /*
+                 * 全部使用标准 Java Class
+                 * 不再混用 YukiHookAPI KClass
+                 */
+                val eventBusJavaClass =
+                    Class.forName(
+                        eventBusClassName,
+                        false,
+                        classLoader
+                    )
 
-                val eventBusClass = eventBusClassData.getInstance(classLoader)
-
-                // 使用 Java Class，避免和 YukiHookAPI 的 KClass 混淆
                 val commentEventJavaClass =
-                    Class.forName(commentEventClassName, false, classLoader)
+                    Class.forName(
+                        commentEventClassName,
+                        false,
+                        classLoader
+                    )
 
                 // Hook 双击
                 findClass(doubleTapClassName).hook {
@@ -84,10 +96,12 @@ class HookEntry : IYukiHookXposedInit {
 
                             try {
 
-                                // 查找 Aweme 参数
-                                val awemeObj = args.firstOrNull {
-                                    it != null &&
-                                        it.javaClass.name.contains("Aweme")
+                                /*
+                                 * 查找 Aweme 参数
+                                 */
+                                val awemeObj: Any? = args.firstOrNull { arg ->
+                                    arg != null &&
+                                        arg.javaClass.name.contains("Aweme")
                                 }
 
                                 if (awemeObj == null) {
@@ -98,10 +112,11 @@ class HookEntry : IYukiHookXposedInit {
                                 /*
                                  * 查找评论事件构造函数
                                  */
-                                val constructor =
+                                val constructor: java.lang.reflect.Constructor<*>? =
                                     commentEventJavaClass.declaredConstructors
                                         .firstOrNull { ctor ->
-                                            val parameterTypes = ctor.parameterTypes
+                                            val parameterTypes =
+                                                ctor.parameterTypes
 
                                             parameterTypes.size == 1 &&
                                                 parameterTypes[0]
@@ -119,29 +134,51 @@ class HookEntry : IYukiHookXposedInit {
 
                                 constructor.isAccessible = true
 
-                                val commentEvent =
+                                val commentEvent: Any =
                                     constructor.newInstance(awemeObj)
 
                                 /*
                                  * 获取 EventBus 单例
+                                 *
+                                 * 直接使用 Java 反射，
+                                 * 不再调用 YukiHookAPI 的 method()
                                  */
-                                val eventBusInstance =
-                                    eventBusClass
-                                        .method {
-                                            name = "getDefault"
+                                val getDefaultMethod:
+                                    java.lang.reflect.Method? =
+                                    eventBusJavaClass.declaredMethods
+                                        .firstOrNull { m ->
+                                            m.name == "getDefault" &&
+                                                m.parameterTypes.isEmpty()
                                         }
-                                        .get()
-                                        .invoke()
+
+                                if (getDefaultMethod == null) {
+                                    loggerD(
+                                        msg = "未找到 EventBus.getDefault()"
+                                    )
+                                    return@beforeHook
+                                }
+
+                                getDefaultMethod.isAccessible = true
+
+                                val eventBusInstance: Any =
+                                    getDefaultMethod.invoke(null)
+                                        ?: run {
+                                            loggerD(
+                                                msg = "EventBus.getDefault() 返回为空"
+                                            )
+                                            return@beforeHook
+                                        }
 
                                 /*
                                  * 查找 post 方法
                                  */
-                                val postMethod =
-                                    eventBusClass.java.methods
-                                        .firstOrNull { post ->
-                                            post.name == "post" &&
-                                                post.parameterTypes.size == 1 &&
-                                                post.parameterTypes[0]
+                                val postMethod:
+                                    java.lang.reflect.Method? =
+                                    eventBusJavaClass.methods
+                                        .firstOrNull { m ->
+                                            m.name == "post" &&
+                                                m.parameterTypes.size == 1 &&
+                                                m.parameterTypes[0]
                                                     .isAssignableFrom(
                                                         commentEvent.javaClass
                                                     )
@@ -149,7 +186,7 @@ class HookEntry : IYukiHookXposedInit {
 
                                 if (postMethod == null) {
                                     loggerD(
-                                        msg = "未找到兼容评论事件的 EventBus.post 方法"
+                                        msg = "未找到兼容评论事件的 EventBus.post()"
                                     )
                                     return@beforeHook
                                 }
