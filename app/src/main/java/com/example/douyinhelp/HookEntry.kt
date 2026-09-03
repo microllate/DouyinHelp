@@ -3,10 +3,11 @@ package com.example.douyinhelp
 import com.highcapable.yukihookapi.annotation.xposed.InjectYukiHookWithXposed
 import com.highcapable.yukihookapi.hook.factory.configs
 import com.highcapable.yukihookapi.hook.factory.encase
-import com.highcapable.yukihookapi.hook.factory.method
 import com.highcapable.yukihookapi.hook.log.loggerD
 import com.highcapable.yukihookapi.hook.xposed.proxy.IYukiHookXposedInit
 import org.luckypray.dexkit.DexKitBridge
+import java.lang.reflect.Constructor
+import java.lang.reflect.Method
 
 @InjectYukiHookWithXposed
 class HookEntry : IYukiHookXposedInit {
@@ -28,188 +29,107 @@ class HookEntry : IYukiHookXposedInit {
 
             DexKitBridge.create(apkPath).use { bridge ->
 
-                // 查找双击手势类
-                val doubleTapClassName: String = bridge.findClass {
+                // 1. 定位 BaseListFragmentPanel 类
+                val panelClassName = bridge.findClass {
                     matcher {
-                        usingStrings("onDoubleTap")
+                        usingStrings("BaseListFragmentPanel", "getCurrentAweme")
                     }
-                }.firstOrNull()?.name?: run {
-                    loggerD(msg = "未找到双击类")
-                    return@loadApp
-                } 
-
-                // 查找 EventBus
-                val eventBusClassName = bridge.findClass {
+                }.firstOrNull()?.name ?: bridge.findClass {
                     matcher {
-                        usingStrings("No subscribers registered for event")
+                        usingStrings("getCurrentAweme")
                     }
                 }.firstOrNull()?.name
 
-                // 查找评论事件类
-                val commentEventClassName = bridge.findClass {
+                // 2. 定位 VideoEvent 事件类
+                val videoEventClassName = bridge.findClass {
                     matcher {
-                        usingStrings("/douyin/comment")
+                        usingStrings("EVENT_OPEN_COMMENT_PANEL", "VideoEvent")
+                    }
+                }.firstOrNull()?.name ?: bridge.findClass {
+                    matcher {
+                        usingStrings("com/ss/android/ugc/aweme/feed/model/VideoEvent")
                     }
                 }.firstOrNull()?.name
 
-                if (
-                    doubleTapClassName == null ||
-                    eventBusClassName == null ||
-                    commentEventClassName == null
-                ) {
-                    loggerD(
-                        msg = "DexKit 匹配失败，请检查当前抖音版本特征"
-                    )
+                if (panelClassName == null || videoEventClassName == null) {
+                    loggerD(msg = "DexKit 定位 Panel 或 VideoEvent 失败")
                     return@loadApp
                 }
 
-                loggerD(msg = "双击类: $doubleTapClassName")
-                loggerD(msg = "评论事件类: $commentEventClassName")
-                loggerD(msg = "EventBus 类: $eventBusClassName")
+                loggerD(msg = "Panel 类: $panelClassName")
+                loggerD(msg = "VideoEvent 类: $videoEventClassName")
 
-                /*
-                 * 全部使用标准 Java Class
-                 * 不再混用 YukiHookAPI KClass
-                 */
-                val eventBusJavaClass =
-                    Class.forName(
-                        eventBusClassName,
-                        false,
-                        classLoader
-                    )
+                val panelJavaClass = Class.forName(panelClassName, false, classLoader)
+                val videoEventJavaClass = Class.forName(videoEventClassName, false, classLoader)
 
-                val commentEventJavaClass =
-                    Class.forName(
-                        commentEventClassName,
-                        false,
-                        classLoader
-                    )
+                // 3. 寻找 Panel 中无参且返回 Void 的双击处理方法 handleDoubleClick
+                val handleDoubleClickMethod: Method = panelJavaClass.declaredMethods.firstOrNull { m ->
+                    m.returnType == Void.TYPE && m.parameterTypes.isEmpty()
+                } ?: run {
+                    loggerD(msg = "未找到 handleDoubleClick 方法")
+                    return@loadApp
+                }
 
-                // Hook 双击
-                findClass(doubleTapClassName).hook {
+                // 4. 寻找 getCurrentAweme 方法
+                val getCurrentAwemeMethod: Method = panelJavaClass.declaredMethods.firstOrNull { m ->
+                    m.parameterTypes.isEmpty() && m.returnType.name.contains("Aweme")
+                } ?: run {
+                    loggerD(msg = "未找到 getCurrentAweme 方法")
+                    return@loadApp
+                }
+
+                // 5. Hook 双击处理逻辑
+                findClass(panelClassName).hook {
                     injectMember {
                         method {
-                            name = "onDoubleTap"
+                            name = handleDoubleClickMethod.name
                         }
 
                         beforeHook {
-
-                            // 阻止原来的双击点赞
-                            resultFalse()
+                            // 拦截原生双击点赞
+                            resultNull()
 
                             try {
-
-                                /*
-                                 * 查找 Aweme 参数
-                                 */
-                                val awemeObj: Any? = args.firstOrNull { arg ->
-                                    arg != null &&
-                                        arg.javaClass.name.contains("Aweme")
-                                }
-
-                                if (awemeObj == null) {
-                                    loggerD(msg = "未找到 Aweme 参数")
+                                // 获取当前 Aweme
+                                getCurrentAwemeMethod.isAccessible = true
+                                val awemeObj = getCurrentAwemeMethod.invoke(instance) ?: run {
+                                    loggerD(msg = "getCurrentAweme 返回为空")
                                     return@beforeHook
                                 }
 
-                                /*
-                                 * 查找评论事件构造函数
-                                 */
-                                val constructor: java.lang.reflect.Constructor<*>? =
-                                    commentEventJavaClass.declaredConstructors
-                                        .firstOrNull { ctor ->
-                                            val parameterTypes =
-                                                ctor.parameterTypes
+                                // 构造 VideoEvent(14, awemeObj) —— 14 通常代表 EVENT_OPEN_COMMENT_PANEL
+                                val eventConstructor: Constructor<*>? = videoEventJavaClass.declaredConstructors.firstOrNull { c ->
+                                    val params = c.parameterTypes
+                                    params.size == 2 && 
+                                    (params[0] == Int::class.javaPrimitiveType || params[0] == Integer::class.java) &&
+                                    params[1].isAssignableFrom(awemeObj.javaClass)
+                                }
 
-                                            parameterTypes.size == 1 &&
-                                                parameterTypes[0]
-                                                    .isAssignableFrom(
-                                                        awemeObj.javaClass
-                                                    )
-                                        }
-
-                                if (constructor == null) {
-                                    loggerD(
-                                        msg = "未找到兼容 Aweme 的评论事件构造函数"
-                                    )
+                                if (eventConstructor == null) {
+                                    loggerD(msg = "未找到合适的 VideoEvent 构造函数")
                                     return@beforeHook
                                 }
 
-                                constructor.isAccessible = true
+                                eventConstructor.isAccessible = true
+                                val openCommentEvent = eventConstructor.newInstance(14, awemeObj)
 
-                                val commentEvent: Any =
-                                    constructor.newInstance(awemeObj)
+                                // 查找 Panel 中接收 VideoEvent 参数的分发方法 handleVideoEvent
+                                val handleVideoEventMethod: Method? = panelJavaClass.declaredMethods.firstOrNull { m ->
+                                    m.parameterTypes.size == 1 && m.parameterTypes[0].isAssignableFrom(videoEventJavaClass)
+                                }
 
-                                /*
-                                 * 获取 EventBus 单例
-                                 *
-                                 * 直接使用 Java 反射，
-                                 * 不再调用 YukiHookAPI 的 method()
-                                 */
-                                val getDefaultMethod:
-                                    java.lang.reflect.Method? =
-                                    eventBusJavaClass.declaredMethods
-                                        .firstOrNull { m ->
-                                            m.name == "getDefault" &&
-                                                m.parameterTypes.isEmpty()
-                                        }
-
-                                if (getDefaultMethod == null) {
-                                    loggerD(
-                                        msg = "未找到 EventBus.getDefault()"
-                                    )
+                                if (handleVideoEventMethod == null) {
+                                    loggerD(msg = "未找到 handleVideoEvent 方法")
                                     return@beforeHook
                                 }
 
-                                getDefaultMethod.isAccessible = true
+                                handleVideoEventMethod.isAccessible = true
+                                handleVideoEventMethod.invoke(instance, openCommentEvent)
 
-                                val eventBusInstance: Any =
-                                    getDefaultMethod.invoke(null)
-                                        ?: run {
-                                            loggerD(
-                                                msg = "EventBus.getDefault() 返回为空"
-                                            )
-                                            return@beforeHook
-                                        }
-
-                                /*
-                                 * 查找 post 方法
-                                 */
-                                val postMethod:
-                                    java.lang.reflect.Method? =
-                                    eventBusJavaClass.methods
-                                        .firstOrNull { m ->
-                                            m.name == "post" &&
-                                                m.parameterTypes.size == 1 &&
-                                                m.parameterTypes[0]
-                                                    .isAssignableFrom(
-                                                        commentEvent.javaClass
-                                                    )
-                                        }
-
-                                if (postMethod == null) {
-                                    loggerD(
-                                        msg = "未找到兼容评论事件的 EventBus.post()"
-                                    )
-                                    return@beforeHook
-                                }
-
-                                postMethod.isAccessible = true
-
-                                postMethod.invoke(
-                                    eventBusInstance,
-                                    commentEvent
-                                )
-
-                                loggerD(
-                                    msg = "成功拦截双击，已发送评论区事件"
-                                )
+                                loggerD(msg = "成功分发打开评论区事件")
 
                             } catch (e: Throwable) {
-
-                                loggerD(
-                                    msg = "打开评论区异常: ${e.stackTraceToString()}"
-                                )
+                                loggerD(msg = "触发打开评论区异常: ${e.stackTraceToString()}")
                             }
                         }
                     }
