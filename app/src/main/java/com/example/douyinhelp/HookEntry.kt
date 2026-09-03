@@ -29,11 +29,11 @@ class HookEntry : IYukiHookXposedInit {
             DexKitBridge.create(apkPath).use { bridge ->
 
                 // 查找双击手势类
-                val doubleTapClassName = bridge.findClass {
+                val doubleTapClassName = bridge.findMethod {
                     matcher {
-                        usingStrings("onDoubleTap")
+                        name("onDoubleTap")
                     }
-                }.firstOrNull()?.name
+                }.firstOrNull()?.declaringClass?.name
 
                 // 查找 EventBus
                 val eventBusClassName = bridge.findClass {
