@@ -28,7 +28,7 @@ jobs:
           echo "JAVA_TOOL_OPTIONS=$JAVA_TOOL_OPTIONS"
           echo "_JAVA_OPTIONS=$_JAVA_OPTIONS"
           echo "GRADLE_OPTS=$GRADLE_OPTS"
-          ./gradlew --version
+          
 
       - name: Inspect Gradle Wrapper
         run: |
