@@ -1,13 +1,24 @@
 package com.example.douyinhelp
 
-import com.example.douyinhelp.hook.AutoStopHook
 import com.example.douyinhelp.hook.DoubleClickCommentHook
-import com.highcapable.yukihookapi.hook.YukiHookAPI.encase
-import com.highcapable.yukihookapi.hook.factory.preset.AppRegister
+import com.example.douyinhelp.hook.AutoStopHook
+import com.highcapable.yukihookapi.annotation.xposed.InjectYukiHookWithXposed
+import com.highcapable.yukihookapi.hook.factory.configs
+import com.highcapable.yukihookapi.hook.factory.encase
+import com.highcapable.yukihookapi.hook.log.loggerD
+import com.highcapable.yukihookapi.hook.xposed.proxy.IYukiHookXposedInit
 import org.luckypray.dexkit.DexKitBridge
 
 
-class HookEntry : AppRegister() {
+@InjectYukiHookWithXposed
+class HookEntry : IYukiHookXposedInit {
+
+
+    override fun onInit() = configs {
+
+        isDebug = true
+
+    }
 
 
     override fun onHook() = encase {
@@ -16,6 +27,24 @@ class HookEntry : AppRegister() {
         loadApp(
             name = "com.ss.android.ugc.aweme"
         ) {
+
+
+            try {
+
+                System.loadLibrary("dexkit")
+
+
+            } catch (e: Throwable) {
+
+
+                loggerD(
+                    msg = "DexKit 加载失败: ${e.stackTraceToString()}"
+                )
+
+                return@loadApp
+
+            }
+
 
 
             val classLoader =
@@ -29,24 +58,10 @@ class HookEntry : AppRegister() {
 
 
 
-            // =====================================================
-            // 初始化 DexKit
-            // =====================================================
-
-            val bridge =
-                DexKitBridge.create(
-                    apkPath
-                )
-                    ?: return@loadApp
+            DexKitBridge.create(apkPath).use { bridge ->
 
 
-
-            try {
-
-
-                // =================================================
-                // 双击打开评论
-                // =================================================
+                // 双击评论
 
                 DoubleClickCommentHook.hook(
                     bridge,
@@ -54,30 +69,12 @@ class HookEntry : AppRegister() {
                 )
 
 
-
-                // =================================================
-                // 视频播放完成自动停止
-                // =================================================
+                // 自动停止播放
 
                 AutoStopHook.hook(
                     bridge,
                     classLoader
                 )
-
-
-
-            }
-            catch (e:Throwable){
-
-
-                e.printStackTrace()
-
-
-            }
-            finally {
-
-
-                bridge.close()
 
 
             }
