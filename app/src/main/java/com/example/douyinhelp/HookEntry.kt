@@ -13,13 +13,10 @@ import org.luckypray.dexkit.query.matchers.base.StringMatcher
 @InjectYukiHookWithXposed
 class HookEntry : IYukiHookXposedInit {
 
-    override fun onInit() = configs {
-        isDebug = true
-    }
+    override fun onInit() = configs { isDebug = true }
 
     override fun onHook() = encase {
         loadApp(name = "com.ss.android.ugc.aweme") {
-
             try {
                 System.loadLibrary("dexkit")
             } catch (e: Throwable) {
@@ -32,41 +29,22 @@ class HookEntry : IYukiHookXposedInit {
                 return@loadApp
             }
 
-            val apkPath = appInfo.sourceDir
-
-            DexKitBridge.create(apkPath).use { bridge ->
-
-                // ============================================================
-                // 1. BaseListFragmentPanel
-                // ============================================================
-
-                val baseClassData =
-                    bridge.getClassData(
-                        "com.ss.android.ugc.aweme.feed.panel.BaseListFragmentPanel"
-                    )
-
-                if (baseClassData == null) {
+            DexKitBridge.create(appInfo.sourceDir).use { bridge ->
+                val baseClassData = bridge.getClassData("com.ss.android.ugc.aweme.feed.panel.BaseListFragmentPanel") ?: run {
                     loggerD(msg = "找不到 BaseListFragmentPanel")
                     return@loadApp
                 }
 
-                // handleDoubleClick(MotionEvent)
                 val handleDoubleClickData = bridge.findMethod {
                     searchClasses = listOf(baseClassData)
-
                     matcher {
                         name = "handleDoubleClick"
-
-                        params {
-                            add("android.view.MotionEvent")
-                        }
+                        params { add("android.view.MotionEvent") }
                     }
                 }.singleOrNull()
 
-                // handleVideoEvent(一个参数，void)
                 val handleVideoEventData = bridge.findMethod {
                     searchClasses = listOf(baseClassData)
-
                     matcher {
                         name = "handleVideoEvent"
                         paramCount = 1
@@ -74,56 +52,23 @@ class HookEntry : IYukiHookXposedInit {
                     }
                 }.singleOrNull()
 
-                // getCurrentAweme()
                 val getCurrentAwemeData = bridge.findMethod {
                     searchClasses = listOf(baseClassData)
-
                     matcher {
                         name = "getCurrentAweme"
                         paramCount = 0
                     }
                 }.singleOrNull()
 
-                if (
-                    handleDoubleClickData == null ||
-                    handleVideoEventData == null ||
-                    getCurrentAwemeData == null
-                ) {
-                    loggerD(msg = "BaseListFragmentPanel 方法定位失败")
-                    loggerD(
-                        msg = "doubleClick=$handleDoubleClickData, " +
-                                "videoEvent=$handleVideoEventData, " +
-                                "currentAweme=$getCurrentAwemeData"
-                    )
+                if (handleDoubleClickData == null || handleVideoEventData == null || getCurrentAwemeData == null) {
+                    loggerD(msg = "BaseListFragmentPanel 方法定位失败: doubleClick=$handleDoubleClickData, videoEvent=$handleVideoEventData, currentAweme=$getCurrentAwemeData")
                     return@loadApp
                 }
 
-                loggerD(
-                    msg = "BaseListFragmentPanel = ${baseClassData.name}"
-                )
-
-                loggerD(
-                    msg = "handleDoubleClick = " +
-                            "${handleDoubleClickData.methodName}(" +
-                            handleDoubleClickData.paramTypeNames.joinToString() +
-                            ")"
-                )
-
-                loggerD(
-                    msg = "handleVideoEvent = " +
-                            "${handleVideoEventData.methodName}(" +
-                            handleVideoEventData.paramTypeNames.joinToString() +
-                            ")"
-                )
-
-                loggerD(
-                    msg = "getCurrentAweme = " +
-                            "${getCurrentAwemeData.methodName}()"
-                )
-
-                // ============================================================
-                // 2. 找 VideoEvent
-                // ============================================================
+                loggerD(msg = "BaseListFragmentPanel = ${baseClassData.name}")
+                loggerD(msg = "handleDoubleClick = ${handleDoubleClickData.methodName}(${handleDoubleClickData.paramTypeNames.joinToString()})")
+                loggerD(msg = "handleVideoEvent = ${handleVideoEventData.methodName}(${handleVideoEventData.paramTypeNames.joinToString()})")
+                loggerD(msg = "getCurrentAweme = ${getCurrentAwemeData.methodName}()")
 
                 val videoEventClassData = bridge.findClass {
                     matcher {
@@ -133,387 +78,122 @@ class HookEntry : IYukiHookXposedInit {
                             add(StringMatcher("videoType", StringMatchType.Contains))
                             add(StringMatcher("isPlaying", StringMatchType.Contains))
                         }
-
-                        methods {
-                            add {
-                                name = "toString"
-                            }
-                        }
+                        methods { add { name = "toString" } }
                     }
-                }.singleOrNull()
-
-                if (videoEventClassData == null) {
+                }.singleOrNull() ?: run {
                     loggerD(msg = "找不到 VideoEvent 类")
                     return@loadApp
                 }
 
-                loggerD(
-                    msg = "VideoEvent = ${videoEventClassData.name}"
-                )
+                loggerD(msg = "VideoEvent = ${videoEventClassData.name}")
 
-                // ============================================================
-                // 3. 获取真正的 Java Class
-                // ============================================================
+                val baseClass = Class.forName(baseClassData.name, false, classLoader)
+                val videoEventClass = Class.forName(videoEventClassData.name, false, classLoader)
 
-                val baseClass =
-                    Class.forName(
-                        baseClassData.name,
-                        false,
-                        classLoader
-                    )
-
-                val videoEventClass =
-                    Class.forName(
-                        videoEventClassData.name,
-                        false,
-                        classLoader
-                    )
-
-                // ============================================================
-                // 4. 找 VideoEvent(int, Aweme) 构造函数
-                // ============================================================
-
-                val videoEventConstructor =
-                    videoEventClass.declaredConstructors
-                        .firstOrNull { constructor ->
-
-                            val types = constructor.parameterTypes
-
-                            types.size == 2 &&
-                                    (
-                                            types[0] == Int::class.javaPrimitiveType ||
-                                                    types[0] == Int::class.javaObjectType
-                                            ) &&
-                                    types[1].isAssignableFrom(
-                                        Class.forName(
-                                            "com.ss.android.ugc.aweme.feed.model.Aweme",
-                                            false,
-                                            classLoader
-                                        )
-                                    )
-                        }
-
-                if (videoEventConstructor == null) {
-                    loggerD(
-                        msg = "找不到 VideoEvent(int, Aweme) 构造函数"
-                    )
-
-                    videoEventClass.declaredConstructors.forEach {
-                        loggerD(
-                            msg = "VideoEvent 构造函数: $it"
-                        )
-                    }
-
+                val videoEventConstructor = videoEventClass.declaredConstructors.firstOrNull { constructor ->
+                    val types = constructor.parameterTypes
+                    types.size == 2 && 
+                    (types[0] == Int::class.javaPrimitiveType || types[0] == Int::class.javaObjectType) &&
+                    types[1].isAssignableFrom(Class.forName("com.ss.android.ugc.aweme.feed.model.Aweme", false, classLoader))
+                } ?: run {
+                    loggerD(msg = "找不到 VideoEvent(int, Aweme) 构造函数")
+                    videoEventClass.declaredConstructors.forEach { loggerD(msg = "VideoEvent 构造函数: $it") }
                     return@loadApp
                 }
 
                 videoEventConstructor.isAccessible = true
-
-                loggerD(
-                    msg = "VideoEvent 构造函数 = $videoEventConstructor"
-                )
-
-                // ============================================================
-                // 5. Hook handleDoubleClick(MotionEvent)
-                // ============================================================
+                loggerD(msg = "VideoEvent 构造函数 = $videoEventConstructor")
 
                 findClass(baseClass.name).hook {
-
                     injectMember {
-
                         method {
                             name = handleDoubleClickData.methodName
                             param(*handleDoubleClickData.paramTypeNames.toTypedArray())
                         }
-
                         beforeHook {
-
                             try {
-
-                                // ------------------------------------------------
-                                // 获取当前 Aweme
-                                // ------------------------------------------------
-
-                                val getCurrentAwemeMethod =
-                                    baseClass.getDeclaredMethod(
-                                        getCurrentAwemeData.methodName
-                                    ).apply {
-                                        isAccessible = true
-                                    }
-
-                                val aweme =
-                                    getCurrentAwemeMethod.invoke(instance)
-
-                                if (aweme == null) {
-                                    loggerD(
-                                        msg = "getCurrentAweme() 返回 null"
-                                    )
+                                val getCurrentAwemeMethod = baseClass.getDeclaredMethod(getCurrentAwemeData.methodName).apply { isAccessible = true }
+                                val aweme = getCurrentAwemeMethod.invoke(instance) ?: run {
+                                    loggerD(msg = "getCurrentAweme() 返回 null")
                                     return@beforeHook
                                 }
 
-                                loggerD(
-                                    msg = "当前 Aweme = ${aweme.javaClass.name}"
-                                )
+                                loggerD(msg = "当前 Aweme = ${aweme.javaClass.name}")
+                                val openCommentEvent = videoEventConstructor.newInstance(7, aweme)
+                                loggerD(msg = "VideoEvent 创建成功")
 
-                                // ------------------------------------------------
-                                // 创建 VideoEvent
-                                // EVENT_OPEN_COMMENT_PANEL = 7
-                                // ------------------------------------------------
-
-                                val openCommentEvent =
-                                    videoEventConstructor.newInstance(
-                                        7,
-                                        aweme
-                                    )
-
-                                loggerD(
-                                    msg = "VideoEvent 创建成功"
-                                )
-
-                                // ------------------------------------------------
-                                // 调用当前 BaseListFragmentPanel.handleVideoEvent()
-                                // ------------------------------------------------
-
-                                val handleVideoEventMethod =
-                                    baseClass.declaredMethods
-                                        .firstOrNull { method ->
-
-                                            method.name ==
-                                                    handleVideoEventData.methodName &&
-                                                    method.parameterTypes.size ==
-                                                    handleVideoEventData.paramTypeNames.size
-                                        }
-
-                                if (handleVideoEventMethod == null) {
-                                    loggerD(
-                                        msg = "找不到 handleVideoEvent 实例方法"
-                                    )
+                                val handleVideoEventMethod = baseClass.declaredMethods.firstOrNull { method ->
+                                    method.name == handleVideoEventData.methodName && method.parameterTypes.size == handleVideoEventData.paramTypeNames.size
+                                } ?: run {
+                                    loggerD(msg = "找不到 handleVideoEvent 实例方法")
                                     return@beforeHook
                                 }
 
-                                handleVideoEventMethod.isAccessible = true
-
-                                handleVideoEventMethod.invoke(
-                                    instance,
-                                    openCommentEvent
-                                )
-
-                                loggerD(
-                                    msg = "成功打开评论区"
-                                )
-
-                                // ------------------------------------------------
-                                // 最关键：
-                                // 阻止原来的双击点赞
-                                // ------------------------------------------------
-
+                                handleVideoEventMethod.apply { isAccessible = true }.invoke(instance, openCommentEvent)
+                                loggerD(msg = "成功打开评论区")
                                 resultNull()
-
                             } catch (e: Throwable) {
-
-                                loggerD(
-                                    msg =
-                                        "双击打开评论区失败: " +
-                                                e.stackTraceToString()
-                                )
+                                loggerD(msg = "双击打开评论区失败: ${e.stackTraceToString()}")
                             }
                         }
                     }
                 }
 
-               // ============================================================
-// 自动停止播放
-// ============================================================
+                val onVideoPlayerEventData = bridge.findMethod {
+                    searchClasses = listOf(baseClassData)
+                    matcher {
+                        name = "onVideoPlayerEvent"
+                        paramCount = 1
+                        returnType = "void"
+                    }
+                }.singleOrNull()
 
+                val pauseMethodData = bridge.findMethod {
+                    searchClasses = listOf(baseClassData)
+                    matcher {
+                        name = "pauseCurrentPlayerWithListener"
+                        paramCount = 0
+                        returnType = "void"
+                    }
+                }.singleOrNull()
 
-val onVideoPlayerEventData =
-    bridge.findMethod {
+                val showPauseMethodData = bridge.findMethod {
+                    searchClasses = listOf(baseClassData)
+                    matcher {
+                        name = "showIvWhenPause"
+                        paramCount = 0
+                        returnType = "void"
+                    }
+                }.singleOrNull()
 
-        searchClasses = listOf(baseClassData)
-
-        matcher {
-
-            name = "onVideoPlayerEvent"
-
-            paramCount = 1
-
-            returnType = "void"
-
-        }
-
-    }.singleOrNull()
-
-
-
-val pauseMethodData =
-    bridge.findMethod {
-
-        searchClasses = listOf(baseClassData)
-
-        matcher {
-
-            name = "pauseCurrentPlayerWithListener"
-
-            paramCount = 0
-
-            returnType = "void"
-
-        }
-
-    }.singleOrNull()
-
-
-
-val showPauseMethodData =
-    bridge.findMethod {
-
-        searchClasses = listOf(baseClassData)
-
-        matcher {
-
-            name = "showIvWhenPause"
-
-            paramCount = 0
-
-            returnType = "void"
-
-        }
-
-    }.singleOrNull()
-
-
-
-if (
-    onVideoPlayerEventData != null &&
-    pauseMethodData != null
-) {
-
-
-    findClass(baseClass.name).hook {
-
-
-        injectMember {
-
-
-            method {
-
-                name =
-                    onVideoPlayerEventData.methodName
-
-                param(
-                    *onVideoPlayerEventData.paramTypeNames.toTypedArray()
-                )
-
-            }
-
-
-            afterHook {
-
-
-                try {
-
-
-                    val event =
-                        args[0]
-                            ?: return@afterHook
-
-
-
-                    val codeField =
-                        event.javaClass
-                            .declaredFields
-                            .firstOrNull {
-
-                                it.type ==
-                                Int::class.javaPrimitiveType
-
+                if (onVideoPlayerEventData != null && pauseMethodData != null) {
+                    findClass(baseClass.name).hook {
+                        injectMember {
+                            method {
+                                name = onVideoPlayerEventData.methodName
+                                param(*onVideoPlayerEventData.paramTypeNames.toTypedArray())
                             }
-                            ?: return@afterHook
+                            afterHook {
+                                try {
+                                    val event = args[0] ?: return@afterHook
+                                    val codeField = event.javaClass.declaredFields.firstOrNull { it.type == Int::class.javaPrimitiveType } ?: return@afterHook
+                                    codeField.isAccessible = true
+                                    if (codeField.getInt(event) != 7) return@afterHook
 
-
-
-                    codeField.isAccessible = true
-
-
-
-                    val code =
-                        codeField.getInt(event)
-
-
-
-                    if (code != 7) {
-
-                        return@afterHook
-
+                                    baseClass.getDeclaredMethod(pauseMethodData.methodName).apply { isAccessible = true }.invoke(instance)
+                                    showPauseMethodData?.let {
+                                        baseClass.getDeclaredMethod(it.methodName).apply { isAccessible = true }.invoke(instance)
+                                    }
+                                    loggerD(msg = "视频播放完成，自动暂停")
+                                } catch (e: Throwable) {
+                                    loggerD(msg = "自动停止播放失败 ${e.stackTraceToString()}")
+                                }
+                            }
+                        }
                     }
-
-
-
-                    val pauseMethod =
-                        baseClass.getDeclaredMethod(
-                            pauseMethodData.methodName
-                        )
-
-
-                    pauseMethod.isAccessible = true
-
-
-
-                    pauseMethod.invoke(
-                        instance
-                    )
-
-
-
-                    showPauseMethodData?.let {
-
-
-                        val showMethod =
-                            baseClass.getDeclaredMethod(
-                                it.methodName
-                            )
-
-
-                        showMethod.isAccessible = true
-
-
-                        showMethod.invoke(
-                            instance
-                        )
-
-                    }
-
-
-
-                    loggerD(
-                        msg =
-                        "视频播放完成，自动暂停"
-                    )
-
-
-                }
-                catch(e:Throwable){
-
-                    loggerD(
-                        msg =
-                        "自动停止播放失败 ${e.stackTraceToString()}"
-                    )
-
                 }
 
-
-            }
-
-        }
-
-
-    }
-
-}
-
-                loggerD(
-                    msg = "DouyinHelp 双击评论 Hook 安装成功"
-                )
+                loggerD(msg = "DouyinHelp 双击评论 Hook 安装成功")
             }
         }
     }
