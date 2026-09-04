@@ -1,11 +1,13 @@
 package com.example.douyinhelp
 
+import android.app.Application
 import com.highcapable.yukihookapi.annotation.xposed.InjectYukiHookWithXposed
 import com.highcapable.yukihookapi.hook.factory.configs
 import com.highcapable.yukihookapi.hook.factory.encase
 import com.highcapable.yukihookapi.hook.factory.method
 import com.highcapable.yukihookapi.hook.log.loggerD
 import com.highcapable.yukihookapi.hook.xposed.proxy.IYukiHookXposedInit
+import de.robv.android.xposed.helpers.AndroidAppHelper
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.enums.StringMatchType
 import org.luckypray.dexkit.query.matchers.base.StringMatcher
@@ -29,6 +31,12 @@ class HookEntry : IYukiHookXposedInit {
                 loggerD(msg = "ClassLoader is null")
                 return@loadApp
             }
+
+            val application: Application = AndroidAppHelper.currentApplication() ?: run {
+                loggerD(msg = "Application is null")
+                return@loadApp
+            }
+            DownloadHelper.registerClipboardListener(application)
 
             DexKitBridge.create(appInfo.sourceDir).use { bridge ->
                 val baseClassData = bridge.getClassData("com.ss.android.ugc.aweme.feed.panel.BaseListFragmentPanel") ?: run {
@@ -85,7 +93,6 @@ class HookEntry : IYukiHookXposedInit {
                 val videoEventClass = Class.forName(videoEventClassData.name, false, classLoader)
                 val awemeClass = Class.forName("com.ss.android.ugc.aweme.feed.model.Aweme", false, classLoader)
 
-                // 1. 提前缓存 Method 实例，避免在 Hook 回调中重复反射获取
                 val getCurrentAwemeMethod = baseClass.getDeclaredMethod(getCurrentAwemeData.methodName).apply { isAccessible = true }
                 val handleVideoEventMethod = baseClass.declaredMethods.firstOrNull { method ->
                     method.name == handleVideoEventData.methodName && method.parameterTypes.size == handleVideoEventData.paramTypeNames.size
@@ -96,9 +103,9 @@ class HookEntry : IYukiHookXposedInit {
 
                 val videoEventConstructor = videoEventClass.declaredConstructors.firstOrNull { constructor ->
                     val types = constructor.parameterTypes
-                    types.size == 2 && 
-                    (types[0] == Int::class.javaPrimitiveType || types[0] == Int::class.javaObjectType) &&
-                    types[1].isAssignableFrom(awemeClass)
+                    types.size == 2 &&
+                        (types[0] == Int::class.javaPrimitiveType || types[0] == Int::class.javaObjectType) &&
+                        types[1].isAssignableFrom(awemeClass)
                 }?.apply { isAccessible = true } ?: run {
                     loggerD(msg = "VideoEvent constructor not found")
                     return@loadApp
@@ -113,8 +120,9 @@ class HookEntry : IYukiHookXposedInit {
                         beforeHook {
                             try {
                                 val aweme = getCurrentAwemeMethod.invoke(instance) ?: return@beforeHook
+                                DownloadHelper.updateCurrentAweme(aweme)
+
                                 val openCommentEvent = videoEventConstructor.newInstance(7, aweme)
-                                
                                 handleVideoEventMethod.invoke(instance, openCommentEvent)
                                 resultNull()
                             } catch (e: Throwable) {
@@ -154,8 +162,7 @@ class HookEntry : IYukiHookXposedInit {
                 if (onVideoPlayerEventData != null && pauseMethodData != null) {
                     val pauseMethod = baseClass.getDeclaredMethod(pauseMethodData.methodName).apply { isAccessible = true }
                     val showPauseMethod = showPauseMethodData?.let { baseClass.getDeclaredMethod(it.methodName).apply { isAccessible = true } }
-                    
-                    // 2. 用于缓存高频事件中的 Field，避免每次回调都遍历 declaredFields
+
                     var cachedCodeField: Field? = null
 
                     findClass(baseClass.name).hook {
@@ -166,12 +173,14 @@ class HookEntry : IYukiHookXposedInit {
                             }
                             afterHook {
                                 try {
+                                    val aweme = getCurrentAwemeMethod.invoke(instance)
+                                    DownloadHelper.updateCurrentAweme(aweme)
+
                                     val event = args[0] ?: return@afterHook
-                                    
-                                    val codeField = cachedCodeField ?: event.javaClass.declaredFields.firstOrNull { 
-                                        it.type == Int::class.javaPrimitiveType 
-                                    }?.apply { 
-                                        isAccessible = true 
+                                    val codeField = cachedCodeField ?: event.javaClass.declaredFields.firstOrNull {
+                                        it.type == Int::class.javaPrimitiveType
+                                    }?.apply {
+                                        isAccessible = true
                                         cachedCodeField = this
                                     } ?: return@afterHook
 
@@ -180,7 +189,7 @@ class HookEntry : IYukiHookXposedInit {
                                     pauseMethod.invoke(instance)
                                     showPauseMethod?.invoke(instance)
                                 } catch (e: Throwable) {
-                                    loggerD(msg = "Auto pause failed: ${e.stackTraceToString()}")
+                                    loggerD(msg = "Video event handling failed: ${e.stackTraceToString()}")
                                 }
                             }
                         }
