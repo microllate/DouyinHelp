@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="true"
         android:label="DouyinHelp"
@@ -13,7 +15,7 @@
 
         <meta-data
             android:name="xposeddescription"
-            android:value="抖音双击手势 Hook 模块" />
+            android:value="抖音双击手势 Hook 模块，复制链接自动下载视频" />
 
         <meta-data
             android:name="xposedminversion"
