@@ -7,7 +7,6 @@ import com.highcapable.yukihookapi.hook.factory.encase
 import com.highcapable.yukihookapi.hook.factory.method
 import com.highcapable.yukihookapi.hook.log.loggerD
 import com.highcapable.yukihookapi.hook.xposed.proxy.IYukiHookXposedInit
-import de.robv.android.xposed.helpers.AndroidAppHelper
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.enums.StringMatchType
 import org.luckypray.dexkit.query.matchers.base.StringMatcher
@@ -32,7 +31,7 @@ class HookEntry : IYukiHookXposedInit {
                 return@loadApp
             }
 
-            val application: Application = AndroidAppHelper.currentApplication() ?: run {
+            val application = getCurrentApplication() ?: run {
                 loggerD(msg = "Application is null")
                 return@loadApp
             }
@@ -198,6 +197,18 @@ class HookEntry : IYukiHookXposedInit {
 
                 loggerD(msg = "DouyinHelp hooks initialized successfully")
             }
+        }
+    }
+
+    private fun getCurrentApplication(): Application? {
+        return try {
+            val activityThread = Class.forName("android.app.ActivityThread")
+            val method = activityThread.getDeclaredMethod("currentApplication")
+            method.isAccessible = true
+            method.invoke(null) as? Application
+        } catch (e: Throwable) {
+            loggerD(msg = "Get current application failed: ${e.stackTraceToString()}")
+            null
         }
     }
 }
