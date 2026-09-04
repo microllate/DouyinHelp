@@ -17,23 +17,28 @@ object DoubleClickCommentHook {
 
 
         // ============================================================
-        // BaseListFragmentPanel
+        // 1. BaseListFragmentPanel
         // ============================================================
 
         val baseClassData =
             bridge.getClassData(
                 "com.ss.android.ugc.aweme.feed.panel.BaseListFragmentPanel"
             )
-                ?: run {
-                    loggerD("BaseListFragmentPanel 未找到")
-                    return
-                }
+
+
+        if (baseClassData == null) {
+
+            loggerD(
+                msg = "找不到 BaseListFragmentPanel"
+            )
+
+            return
+
+        }
 
 
 
-        // ============================================================
-        // handleDoubleClick
-        // ============================================================
+        // handleDoubleClick(MotionEvent)
 
         val handleDoubleClickData =
             bridge.findMethod {
@@ -44,7 +49,13 @@ object DoubleClickCommentHook {
 
                     name = "handleDoubleClick"
 
-                    paramCount = 1
+                    params {
+
+                        add(
+                            "android.view.MotionEvent"
+                        )
+
+                    }
 
                 }
 
@@ -52,9 +63,7 @@ object DoubleClickCommentHook {
 
 
 
-        // ============================================================
         // handleVideoEvent
-        // ============================================================
 
         val handleVideoEventData =
             bridge.findMethod {
@@ -67,15 +76,15 @@ object DoubleClickCommentHook {
 
                     paramCount = 1
 
+                    returnType = "void"
+
                 }
 
             }.singleOrNull()
 
 
 
-        // ============================================================
         // getCurrentAweme
-        // ============================================================
 
         val getCurrentAwemeData =
             bridge.findMethod {
@@ -100,15 +109,31 @@ object DoubleClickCommentHook {
             getCurrentAwemeData == null
         ) {
 
-            loggerD("双击评论方法定位失败")
+            loggerD(
+                msg = "BaseListFragmentPanel 方法定位失败"
+            )
+
+            loggerD(
+                msg =
+                "doubleClick=$handleDoubleClickData, " +
+                        "videoEvent=$handleVideoEventData, " +
+                        "currentAweme=$getCurrentAwemeData"
+            )
+
             return
 
         }
 
 
 
+        loggerD(
+            msg = "BaseListFragmentPanel = ${baseClassData.name}"
+        )
+
+
+
         // ============================================================
-        // VideoEvent
+        // 2. 找 VideoEvent
         // ============================================================
 
         val videoEventClassData =
@@ -118,12 +143,48 @@ object DoubleClickCommentHook {
 
                     usingStrings {
 
+
                         add(
                             StringMatcher(
                                 "VideoEvent",
                                 StringMatchType.Contains
                             )
                         )
+
+
+                        add(
+                            StringMatcher(
+                                "param",
+                                StringMatchType.Contains
+                            )
+                        )
+
+
+                        add(
+                            StringMatcher(
+                                "videoType",
+                                StringMatchType.Contains
+                            )
+                        )
+
+
+                        add(
+                            StringMatcher(
+                                "isPlaying",
+                                StringMatchType.Contains
+                            )
+                        )
+
+                    }
+
+
+                    methods {
+
+                        add {
+
+                            name = "toString"
+
+                        }
 
                     }
 
@@ -133,16 +194,30 @@ object DoubleClickCommentHook {
 
 
 
-        if(videoEventClassData == null){
+        if (videoEventClassData == null) {
 
-            loggerD("VideoEvent 未找到")
+            loggerD(
+                msg = "找不到 VideoEvent 类"
+            )
+
             return
 
         }
 
 
 
-        val panelClass =
+        loggerD(
+            msg = "VideoEvent = ${videoEventClassData.name}"
+        )
+
+
+
+        // ============================================================
+        // 3. 获取 Java Class
+        // ============================================================
+
+
+        val baseClass =
             Class.forName(
                 baseClassData.name,
                 false,
@@ -160,126 +235,210 @@ object DoubleClickCommentHook {
 
 
         // ============================================================
-        // VideoEvent(int, Aweme)
+        // 4. 找 VideoEvent(int, Aweme)
         // ============================================================
 
-        val constructor =
+        val videoEventConstructor =
             videoEventClass
                 .declaredConstructors
-                .firstOrNull {
+                .firstOrNull { constructor ->
 
 
-                    it.parameterTypes.size == 2 &&
-                    it.parameterTypes[0] == Int::class.javaPrimitiveType
+                    val types =
+                        constructor.parameterTypes
+
+
+                    types.size == 2 &&
+                            (
+                                    types[0] == Int::class.javaPrimitiveType ||
+                                            types[0] == Int::class.javaObjectType
+                                    ) &&
+                            types[1].isAssignableFrom(
+                                Class.forName(
+                                    "com.ss.android.ugc.aweme.feed.model.Aweme",
+                                    false,
+                                    classLoader
+                                )
+                            )
 
                 }
 
 
-        if(constructor == null){
 
-            loggerD("VideoEvent构造失败")
+        if (videoEventConstructor == null) {
+
+            loggerD(
+                msg = "找不到 VideoEvent(int, Aweme) 构造函数"
+            )
+
             return
 
         }
 
 
-        constructor.isAccessible = true
+
+        videoEventConstructor.isAccessible = true
 
 
 
         // ============================================================
-        // Hook 双击
+        // 5. Hook handleDoubleClick
         // ============================================================
 
-        panelClass.method {
 
-            name =
-                handleDoubleClickData.methodName
-
-        }.hook {
+        findClass(
+            baseClass.name
+        ).hook {
 
 
-            before {
+            injectMember {
 
 
-                try {
+                method {
 
 
-                    val awemeMethod =
-                        panelClass.getDeclaredMethod(
-                            getCurrentAwemeData.methodName
-                        )
+                    name =
+                        handleDoubleClickData.methodName
 
 
-                    awemeMethod.isAccessible = true
+                    param(
+                        *handleDoubleClickData
+                            .paramTypeNames
+                            .toTypedArray()
+                    )
 
-
-                    val aweme =
-                        awemeMethod.invoke(instance)
+                }
 
 
 
-                    if(aweme == null)
-                        return@before
+                beforeHook {
 
 
-
-                    // 7 = 打开评论事件
-
-                    val event =
-                        constructor.newInstance(
-                            7,
-                            aweme
-                        )
+                    try {
 
 
+                        val getCurrentAwemeMethod =
+                            baseClass.getDeclaredMethod(
+                                getCurrentAwemeData.methodName
+                            ).apply {
 
-                    val videoMethod =
-                        panelClass
-                            .declaredMethods
-                            .firstOrNull {
-
-                                it.name ==
-                                        handleVideoEventData.methodName &&
-                                it.parameterTypes.size == 1
+                                isAccessible = true
 
                             }
 
 
 
-                    videoMethod?.apply {
+                        val aweme =
+                            getCurrentAwemeMethod.invoke(
+                                instance
+                            )
 
-                        isAccessible = true
 
-                        invoke(
-                            instance,
-                            event
+
+                        if (aweme == null) {
+
+
+                            loggerD(
+                                msg = "getCurrentAweme() 返回 null"
+                            )
+
+
+                            return@beforeHook
+
+                        }
+
+
+
+                        loggerD(
+                            msg = "当前 Aweme = ${aweme.javaClass.name}"
                         )
+
+
+
+                        // 打开评论事件
+
+                        val openCommentEvent =
+                            videoEventConstructor.newInstance(
+                                7,
+                                aweme
+                            )
+
+
+
+                        loggerD(
+                            msg = "VideoEvent 创建成功"
+                        )
+
+
+
+                        val handleVideoEventMethod =
+                            baseClass
+                                .declaredMethods
+                                .firstOrNull { method ->
+
+
+                                    method.name ==
+                                            handleVideoEventData.methodName &&
+
+                                            method.parameterTypes.size ==
+                                            handleVideoEventData.paramTypeNames.size
+
+
+                                }
+
+
+
+                        if (handleVideoEventMethod == null) {
+
+
+                            loggerD(
+                                msg = "找不到 handleVideoEvent 实例方法"
+                            )
+
+
+                            return@beforeHook
+
+                        }
+
+
+
+                        handleVideoEventMethod.isAccessible = true
+
+
+
+                        handleVideoEventMethod.invoke(
+                            instance,
+                            openCommentEvent
+                        )
+
+
+
+                        loggerD(
+                            msg = "成功打开评论区"
+                        )
+
+
+
+                        // 阻止点赞
+
+                        resultNull()
+
+
+
+                    }
+                    catch (e: Throwable) {
+
+
+                        loggerD(
+                            msg =
+                            "双击打开评论区失败: " +
+                                    e.stackTraceToString()
+                        )
+
 
                     }
 
-
-
-                    //取消点赞
-
-                    resultNull()
-
-
-
-                    loggerD(
-                        "双击评论成功"
-                    )
-
-
                 }
-                catch(e:Throwable){
-
-                    loggerD(
-                        "双击评论异常:${e.message}"
-                    )
-
-                }
-
 
             }
 
@@ -288,7 +447,7 @@ object DoubleClickCommentHook {
 
 
         loggerD(
-            "DoubleClickCommentHook安装完成"
+            msg = "DouyinHelp 双击评论 Hook 安装成功"
         )
 
     }
