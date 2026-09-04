@@ -321,6 +321,196 @@ class HookEntry : IYukiHookXposedInit {
                     }
                 }
 
+               // ============================================================
+// 自动停止播放
+// ============================================================
+
+
+val onVideoPlayerEventData =
+    bridge.findMethod {
+
+        searchClasses = listOf(baseClassData)
+
+        matcher {
+
+            name = "onVideoPlayerEvent"
+
+            paramCount = 1
+
+            returnType = "void"
+
+        }
+
+    }.singleOrNull()
+
+
+
+val pauseMethodData =
+    bridge.findMethod {
+
+        searchClasses = listOf(baseClassData)
+
+        matcher {
+
+            name = "pauseCurrentPlayerWithListener"
+
+            paramCount = 0
+
+            returnType = "void"
+
+        }
+
+    }.singleOrNull()
+
+
+
+val showPauseMethodData =
+    bridge.findMethod {
+
+        searchClasses = listOf(baseClassData)
+
+        matcher {
+
+            name = "showIvWhenPause"
+
+            paramCount = 0
+
+            returnType = "void"
+
+        }
+
+    }.singleOrNull()
+
+
+
+if (
+    onVideoPlayerEventData != null &&
+    pauseMethodData != null
+) {
+
+
+    findClass(baseClass.name).hook {
+
+
+        injectMember {
+
+
+            method {
+
+                name =
+                    onVideoPlayerEventData.methodName
+
+                param(
+                    *onVideoPlayerEventData.paramTypeNames.toTypedArray()
+                )
+
+            }
+
+
+            afterHook {
+
+
+                try {
+
+
+                    val event =
+                        args[0]
+                            ?: return@afterHook
+
+
+
+                    val codeField =
+                        event.javaClass
+                            .declaredFields
+                            .firstOrNull {
+
+                                it.type ==
+                                Int::class.javaPrimitiveType
+
+                            }
+                            ?: return@afterHook
+
+
+
+                    codeField.isAccessible = true
+
+
+
+                    val code =
+                        codeField.getInt(event)
+
+
+
+                    if (code != 7) {
+
+                        return@afterHook
+
+                    }
+
+
+
+                    val pauseMethod =
+                        baseClass.getDeclaredMethod(
+                            pauseMethodData.methodName
+                        )
+
+
+                    pauseMethod.isAccessible = true
+
+
+
+                    pauseMethod.invoke(
+                        instance
+                    )
+
+
+
+                    showPauseMethodData?.let {
+
+
+                        val showMethod =
+                            baseClass.getDeclaredMethod(
+                                it.methodName
+                            )
+
+
+                        showMethod.isAccessible = true
+
+
+                        showMethod.invoke(
+                            instance
+                        )
+
+                    }
+
+
+
+                    loggerD(
+                        msg =
+                        "视频播放完成，自动暂停"
+                    )
+
+
+                }
+                catch(e:Throwable){
+
+                    loggerD(
+                        msg =
+                        "自动停止播放失败 ${e.stackTraceToString()}"
+                    )
+
+                }
+
+
+            }
+
+        }
+
+
+    }
+
+}
+
                 loggerD(
                     msg = "DouyinHelp 双击评论 Hook 安装成功"
                 )
