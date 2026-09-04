@@ -31,12 +31,6 @@ class HookEntry : IYukiHookXposedInit {
                 return@loadApp
             }
 
-            val application = getCurrentApplication() ?: run {
-                loggerD(msg = "Application is null")
-                return@loadApp
-            }
-            DownloadHelper.registerClipboardListener(application)
-
             DexKitBridge.create(appInfo.sourceDir).use { bridge ->
                 val baseClassData = bridge.getClassData("com.ss.android.ugc.aweme.feed.panel.BaseListFragmentPanel") ?: run {
                     loggerD(msg = "BaseListFragmentPanel not found")
@@ -120,6 +114,7 @@ class HookEntry : IYukiHookXposedInit {
                             try {
                                 val aweme = getCurrentAwemeMethod.invoke(instance) ?: return@beforeHook
                                 DownloadHelper.updateCurrentAweme(aweme)
+                                registerDownloadListener()
 
                                 val openCommentEvent = videoEventConstructor.newInstance(7, aweme)
                                 handleVideoEventMethod.invoke(instance, openCommentEvent)
@@ -174,6 +169,7 @@ class HookEntry : IYukiHookXposedInit {
                                 try {
                                     val aweme = getCurrentAwemeMethod.invoke(instance)
                                     DownloadHelper.updateCurrentAweme(aweme)
+                                    registerDownloadListener()
 
                                     val event = args[0] ?: return@afterHook
                                     val codeField = cachedCodeField ?: event.javaClass.declaredFields.firstOrNull {
@@ -198,6 +194,11 @@ class HookEntry : IYukiHookXposedInit {
                 loggerD(msg = "DouyinHelp hooks initialized successfully")
             }
         }
+    }
+
+    private fun registerDownloadListener() {
+        val application = getCurrentApplication() ?: return
+        DownloadHelper.registerClipboardListener(application)
     }
 
     private fun getCurrentApplication(): Application? {
