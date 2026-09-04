@@ -1,6 +1,5 @@
 package com.example.douyinhelp
 
-import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
@@ -55,8 +54,9 @@ object DownloadHelper {
 
     private fun readClipboard(clipboard: ClipboardManager): String? {
         if (!clipboard.hasPrimaryClip()) return null
-        val clip: ClipData = clipboard.primaryClip ?: return null
-        return clip.getItemAt(0).coerceToText(null).toString().trim()
+        val clip = clipboard.primaryClip ?: return null
+        if (clip.itemCount == 0) return null
+        return clip.getItemAt(0).text?.toString()?.trim()
     }
 
     private fun isDouyinShareText(text: String): Boolean {
@@ -99,7 +99,7 @@ object DownloadHelper {
             val address = getFieldValue(video, name) ?: continue
             val urls = getFieldValue(address, "urlList") ?: continue
             if (urls is Iterable<*>) {
-                urls.forEach { value ->
+                for (value in urls) {
                     val url = value?.toString()
                     if (!url.isNullOrBlank()) return url
                 }
