@@ -15,7 +15,7 @@ import java.lang.reflect.Field
 @InjectYukiHookWithXposed
 class HookEntry : IYukiHookXposedInit {
 
-    override fun onInit() = configs { isDebug = true }
+    override fun onInit() = configs { isDebug = false }
 
     override fun onHook() = encase {
         loadApp(name = "com.ss.android.ugc.aweme") {
